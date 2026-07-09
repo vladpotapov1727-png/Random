@@ -20,7 +20,7 @@ from aiogram.fsm.context import FSMContext
 # НАСТРОЙКИ
 # ===========================
 
-BOT_TOKEN = "ВСТАВЬ_СЮДА_ТОКЕН"
+BOT_TOKEN = "8769346438:AAGwRDxzGszAVmRhAT8z7pFfaRCJDi6jHzU"
 
 ADMIN_ID = 7197233783
 
