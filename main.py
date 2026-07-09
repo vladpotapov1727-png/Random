@@ -6,24 +6,47 @@ from aiogram import Bot, Dispatcher, types, F
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.filters import Command
 
-TOKEN = os.environ.get('8769346438:AAGwRDxzGszAVmRhAT8z7pFfaRCJDi6jHzU')
+# ===== ВЕБ-СЕРВЕР ДЛЯ HEALTH CHECK (ЧТОБЫ НЕ ЗАСЫПАЛ) =====
+from flask import Flask
+from threading import Thread
+
+app = Flask('')
+
+@app.route('/')
+def home():
+    return "🤖 Бот Randomazer работает 24/7!"
+
+def run():
+    app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 8080)))
+
+def keep_alive():
+    t = Thread(target=run)
+    t.start()
+
+# ===== НАСТРОЙКИ БОТА =====
+TOKEN = os.environ.get('BOT_TOKEN')
 if not TOKEN:
-    raise ValueError("BOT_TOKEN не найден!")
+    raise ValueError("BOT_TOKEN не найден! Добавь его в переменные окружения на Railway.")
 
 bot = Bot(token=TOKEN)
 dp = Dispatcher()
 
-# ========== ДАННЫЕ ==========
-ADMIN_ID = 7197233783  # ТВОЙ ID
+# ===== ДАННЫЕ =====
+ADMIN_ID = 7197233783  # ТВОЙ ID (замени на свой)
 
-# Все розыгрыши
-raffles = {}  # {raffle_id: {"creator": user_id, "channel": "@channel", "end_date": timestamp, "prizes": [], "participants": [], "winner": None, "status": "active"}}
+# Твои личные розыгрыши
+my_raffles = {
+    "participants": [],
+    "is_running": False,
+    "winner": None,
+    "prizes": ["Главный приз", "Второй приз", "Третий приз"]
+}
+
+# Все розыгрыши пользователей
+raffles = {}
 raffle_counter = 0
 
-# Твои личные розыгрыши (как раньше)
-my_raffles = {"participants": [], "is_running": False, "winner": None, "prizes": ["Главный приз", "Второй приз", "Третий приз"]}
-
-# ========== КОМАНДА /start ==========
+# ===== КОМАНДА /start =====
 @dp.message(Command("start"))
 async def start(message: types.Message):
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
@@ -40,7 +63,7 @@ async def start(message: types.Message):
         reply_markup=keyboard
     )
 
-# ========== АДМИН-ПАНЕЛЬ ==========
+# ===== КОМАНДА /admin =====
 @dp.message(Command("admin"))
 async def admin_panel(message: types.Message):
     if message.from_user.id != ADMIN_ID:
@@ -49,7 +72,7 @@ async def admin_panel(message: types.Message):
     
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="📋 Мои участники", callback_data="my_list")],
-        [InlineKeyboardButton(text="🎲 Мои победители", callback_data="my_pick")],
+        [InlineKeyboardButton(text="🎲 Выбрать победителей", callback_data="my_pick")],
         [InlineKeyboardButton(text="📊 Все розыгрыши", callback_data="all_raffles")],
         [InlineKeyboardButton(text="🗑 Очистить моих участников", callback_data="my_clear")]
     ])
@@ -61,7 +84,7 @@ async def admin_panel(message: types.Message):
         reply_markup=keyboard
     )
 
-# ========== КНОПКА "УЧАСТВОВАТЬ" ==========
+# ===== КНОПКА "УЧАСТВОВАТЬ" (в моём розыгрыше) =====
 @dp.callback_query(F.data == "join")
 async def join_my_raffle(callback: types.CallbackQuery):
     global my_raffles
@@ -80,9 +103,9 @@ async def join_my_raffle(callback: types.CallbackQuery):
         "first_name": first_name
     })
     
-    await callback.answer("✅ Вы зарегистрированы!", show_alert=False)
+    await callback.answer("✅ Вы зарегистрированы в розыгрыше!", show_alert=False)
 
-# ========== СПИСОК РОЗЫГРЫШЕЙ ==========
+# ===== СПИСОК РОЗЫГРЫШЕЙ =====
 @dp.callback_query(F.data == "list_raffles")
 async def list_raffles(callback: types.CallbackQuery):
     active = [r for r in raffles.values() if r["status"] == "active"]
@@ -94,8 +117,12 @@ async def list_raffles(callback: types.CallbackQuery):
     
     text = "📋 Активные розыгрыши:\n\n"
     for idx, r in enumerate(active, 1):
-        creator = await bot.get_chat(r["creator"])
-        text += f"{idx}. Создатель: @{creator.username or 'неизвестно'}\n"
+        try:
+            creator = await bot.get_chat(r["creator"])
+            creator_name = creator.username or "неизвестно"
+        except:
+            creator_name = "неизвестно"
+        text += f"{idx}. Создатель: @{creator_name}\n"
         text += f"   📢 Канал: {r['channel']}\n"
         text += f"   👥 Участников: {len(r['participants'])}\n"
         text += f"   ⏳ До: {datetime.fromtimestamp(r['end_date']).strftime('%d.%m.%Y %H:%M')}\n\n"
@@ -103,7 +130,7 @@ async def list_raffles(callback: types.CallbackQuery):
     await callback.message.answer(text)
     await callback.answer()
 
-# ========== СОЗДАНИЕ РОЗЫГРЫША ==========
+# ===== СОЗДАНИЕ РОЗЫГРЫША =====
 @dp.callback_query(F.data == "create_raffle")
 async def create_raffle_start(callback: types.CallbackQuery):
     await callback.message.answer(
@@ -117,16 +144,54 @@ async def create_raffle_start(callback: types.CallbackQuery):
     )
     await callback.answer()
 
-# ========== ОБРАБОТЧИК СООБЩЕНИЙ ==========
+# ===== УЧАСТИЕ В ЧУЖОМ РОЗЫГРЫШЕ =====
+@dp.callback_query(F.data.startswith("join_raffle_"))
+async def join_raffle(callback: types.CallbackQuery):
+    raffle_id = int(callback.data.split("_")[2])
+    raffle = raffles.get(raffle_id)
+    
+    if not raffle or raffle["status"] != "active":
+        await callback.answer("❌ Розыгрыш уже завершён!", show_alert=True)
+        return
+    
+    # Проверка подписки
+    try:
+        status = await bot.get_chat_member(raffle["channel"], callback.from_user.id)
+        if status.status in ["left", "kicked"]:
+            await callback.answer(f"❌ Подпишись на {raffle['channel']}!", show_alert=True)
+            return
+    except:
+        await callback.answer("⚠️ Ошибка проверки подписки!", show_alert=True)
+        return
+    
+    user_id = str(callback.from_user.id)
+    username = callback.from_user.username or "без username"
+    first_name = callback.from_user.first_name or "без имени"
+    
+    for p in raffle["participants"]:
+        if p["user_id"] == user_id:
+            await callback.answer("⚠️ Вы уже участвуете!", show_alert=False)
+            return
+    
+    raffle["participants"].append({
+        "user_id": user_id,
+        "username": username,
+        "first_name": first_name
+    })
+    
+    await callback.answer("✅ Вы участвуете в розыгрыше!", show_alert=False)
+
+# ===== ОБРАБОТЧИК ТЕКСТОВЫХ СООБЩЕНИЙ =====
 @dp.message()
 async def handle_text(message: types.Message):
-    global raffle_counter, raffles
+    global raffle_counter, raffles, my_raffles
     
+    # Если сообщение от админа
     if message.from_user.id == ADMIN_ID:
-        # Обработка ввода для админа
         text = message.text.strip()
+        
+        # Выбор победителей (если число)
         if text.isdigit():
-            # Выбор победителя для моего розыгрыша
             count = int(text)
             if 1 <= count <= 10 and len(my_raffles["participants"]) > 0:
                 shuffled = my_raffles["participants"].copy()
@@ -143,7 +208,7 @@ async def handle_text(message: types.Message):
                 my_raffles["participants"] = []
                 return
         
-        # Настройка призов для моего розыгрыша
+        # Настройка призов
         if "1 место" in text and "2 место" in text:
             try:
                 parts = text.split(",")
@@ -185,7 +250,6 @@ async def handle_text(message: types.Message):
                 "status": "active"
             }
             
-            # Кнопка для участия в этом розыгрыше
             keyboard = InlineKeyboardMarkup(inline_keyboard=[
                 [InlineKeyboardButton(text="🎯 Участвовать", callback_data=f"join_raffle_{raffle_counter}")]
             ])
@@ -204,44 +268,7 @@ async def handle_text(message: types.Message):
                 "Пример: @my_channel 10.07.2026 15:00 1 место: iPhone, 2 место: AirPods"
             )
 
-# ========== УЧАСТИЕ В ЧУЖОМ РОЗЫГРЫШЕ ==========
-@dp.callback_query(F.data.startswith("join_raffle_"))
-async def join_raffle(callback: types.CallbackQuery):
-    raffle_id = int(callback.data.split("_")[2])
-    raffle = raffles.get(raffle_id)
-    
-    if not raffle or raffle["status"] != "active":
-        await callback.answer("❌ Розыгрыш уже завершён!", show_alert=True)
-        return
-    
-    # Проверка подписки
-    try:
-        status = await bot.get_chat_member(raffle["channel"], callback.from_user.id)
-        if status.status in ["left", "kicked"]:
-            await callback.answer(f"❌ Подпишись на {raffle['channel']}!", show_alert=True)
-            return
-    except:
-        await callback.answer("⚠️ Ошибка проверки подписки!", show_alert=True)
-        return
-    
-    user_id = str(callback.from_user.id)
-    username = callback.from_user.username or "без username"
-    first_name = callback.from_user.first_name or "без имени"
-    
-    for p in raffle["participants"]:
-        if p["user_id"] == user_id:
-            await callback.answer("⚠️ Вы уже участвуете!", show_alert=False)
-            return
-    
-    raffle["participants"].append({
-        "user_id": user_id,
-        "username": username,
-        "first_name": first_name
-    })
-    
-    await callback.answer("✅ Вы участвуете в розыгрыше!", show_alert=False)
-
-# ========== АДМИН-ФУНКЦИИ (callback) ==========
+# ===== АДМИН-ФУНКЦИИ (callback) =====
 @dp.callback_query(F.data == "my_list")
 async def my_list(callback: types.CallbackQuery):
     if callback.from_user.id != ADMIN_ID:
@@ -297,8 +324,12 @@ async def all_raffles_admin(callback: types.CallbackQuery):
     
     text = "📊 ВСЕ РОЗЫГРЫШИ:\n\n"
     for idx, (rid, r) in enumerate(raffles.items(), 1):
-        creator = await bot.get_chat(r["creator"])
-        text += f"{idx}. Создатель: @{creator.username or 'неизвестно'}\n"
+        try:
+            creator = await bot.get_chat(r["creator"])
+            creator_name = creator.username or "неизвестно"
+        except:
+            creator_name = "неизвестно"
+        text += f"{idx}. Создатель: @{creator_name}\n"
         text += f"   📢 Канал: {r['channel']}\n"
         text += f"   👥 Участников: {len(r['participants'])}\n"
         text += f"   ⏳ До: {datetime.fromtimestamp(r['end_date']).strftime('%d.%m.%Y %H:%M')}\n"
@@ -308,10 +339,11 @@ async def all_raffles_admin(callback: types.CallbackQuery):
     await callback.message.answer(text)
     await callback.answer()
 
-# ========== ЗАПУСК ==========
+# ===== ЗАПУСК БОТА =====
 async def main():
-    print("🤖 Randomazer запущен!")
+    print("🤖 Бот Randomazer запущен и никогда не засыпает!")
     await dp.start_polling(bot, drop_pending_updates=True)
 
 if __name__ == "__main__":
+    keep_alive()  # Запускаем веб-сервер (чтобы Railway не убивал бота)
     asyncio.run(main())
