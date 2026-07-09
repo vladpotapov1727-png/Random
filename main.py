@@ -3,13 +3,13 @@ import asyncio
 import random
 from datetime import datetime, timedelta
 from aiogram import Bot, Dispatcher, types, F
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, Message, InputMediaPhoto, InputMediaVideo, InputMediaDocument
-from aiogram.filters import Command, StateFilter
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, Message, CallbackQuery
+from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.memory import MemoryStorage
 
-# ===== ВЕБ-СЕРВЕР ДЛЯ HEALTH CHECK =====
+# ===== ВЕБ-СЕРВЕР =====
 from flask import Flask
 from threading import Thread
 
@@ -44,8 +44,7 @@ user_channels = {}
 
 # ===== СОСТОЯНИЯ FSM =====
 class CreateRaffle(StatesGroup):
-    waiting_text = State()
-    waiting_media = State()
+    waiting_post = State()
     waiting_button_text = State()
     waiting_channels = State()
     waiting_winners_count = State()
@@ -55,106 +54,84 @@ class CreateRaffle(StatesGroup):
     waiting_end_date = State()
     waiting_end_participants = State()
 
-# ===== КОМАНДА /start =====
+# ===== ГЛАВНОЕ МЕНЮ (как Best Random Bot) =====
 @dp.message(Command("start"))
 async def start(message: Message):
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="➕ Создать конкурс", callback_data="create_raffle")],
+        [InlineKeyboardButton(text="📝 Создать конкурс", callback_data="create_raffle")],
         [InlineKeyboardButton(text="📋 Мои конкурсы", callback_data="my_raffles")],
-        [InlineKeyboardButton(text="📢 Мои каналы", callback_data="my_channels")],
-        [InlineKeyboardButton(text="🆘 Поддержка", callback_data="support")]
+        [InlineKeyboardButton(text="📢 Мои каналы/чаты", callback_data="my_channels")],
+        [InlineKeyboardButton(text="🆘 Служба поддержки", callback_data="support")]
     ])
     await message.answer(
         "🎲 <b>Randomazer</b>\n\n"
         "Бот для проведения конкурсов с проверкой подписки!\n\n"
         "🔹 <b>Создать конкурс</b> — бот задаст вопросы.\n"
         "🔹 <b>Мои конкурсы</b> — список твоих конкурсов.\n"
-        "🔹 <b>Мои каналы</b> — добавленные каналы.",
+        "🔹 <b>Мои каналы/чаты</b> — добавленные каналы.\n"
+        "🔹 <b>Служба поддержки</b> — помощь.",
         parse_mode="HTML",
         reply_markup=keyboard
     )
 
-# ===== СОЗДАНИЕ КОНКУРСА =====
+# ===== СОЗДАНИЕ КОНКУРСА (ШАГ 1: ПОСТ) =====
 @dp.callback_query(F.data == "create_raffle")
-async def create_raffle_start(callback: types.CallbackQuery, state: FSMContext):
+async def create_raffle_start(callback: CallbackQuery, state: FSMContext):
     await callback.message.answer(
         "📝 <b>Создание конкурса</b>\n\n"
-        "Отправь текст для конкурса.\n"
-        "Можешь использовать разметку HTML:\n"
-        "<code>&lt;b&gt;жирный&lt;/b&gt;</code>, <code>&lt;i&gt;курсив&lt;/i&gt;</code>",
+        "Отправьте текст для конкурса.\n"
+        "Вы можете также отправить вместе с текстом картинку, видео или GIF.\n"
+        "📌 Вы можете использовать только <b>1 медиафайл</b>\n\n"
+        "Бот для проведения конкурсов полностью бесплатный и прозрачный, ему будет приятно, "
+        "если в конкурсном посте Вы укажите на него ссылку, спасибо.\n"
+        "@Randomazery_bot",
         parse_mode="HTML"
     )
-    await state.set_state(CreateRaffle.waiting_text)
+    await state.set_state(CreateRaffle.waiting_post)
     await callback.answer()
 
-@dp.message(CreateRaffle.waiting_text)
-async def get_text(message: Message, state: FSMContext):
-    await state.update_data(text=message.html_text)
+@dp.message(CreateRaffle.waiting_post)
+async def get_post(message: Message, state: FSMContext):
+    media = None
+    text = message.html_text or ""
     
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="📷 Добавить медиа", callback_data="add_media")],
-        [InlineKeyboardButton(text="➡️ Без медиа", callback_data="no_media")]
-    ])
-    await message.answer(
-        "📎 <b>Добавить медиа?</b>\n\n"
-        "Можешь добавить картинку, видео или GIF.",
-        parse_mode="HTML",
-        reply_markup=keyboard
-    )
-    await state.set_state(CreateRaffle.waiting_media)
-
-@dp.callback_query(F.data == "add_media")
-async def add_media(callback: types.CallbackQuery, state: FSMContext):
-    await callback.message.answer(
-        "📤 Отправь медиафайл (картинку, видео или GIF).\n\n"
-        "📌 Только <b>один</b> файл.",
-        parse_mode="HTML"
-    )
-    await state.set_state(CreateRaffle.waiting_media)
-    await callback.answer()
-
-@dp.callback_query(F.data == "no_media")
-async def no_media(callback: types.CallbackQuery, state: FSMContext):
-    await state.update_data(media=None)
-    await ask_button_text(callback.message, state)
-    await callback.answer()
-
-@dp.message(CreateRaffle.waiting_media)
-async def get_media(message: Message, state: FSMContext):
     if message.photo:
-        await state.update_data(media={"type": "photo", "file_id": message.photo[-1].file_id})
+        media = {"type": "photo", "file_id": message.photo[-1].file_id}
     elif message.video:
-        await state.update_data(media={"type": "video", "file_id": message.video.file_id})
+        media = {"type": "video", "file_id": message.video.file_id}
     elif message.animation:
-        await state.update_data(media={"type": "animation", "file_id": message.animation.file_id})
-    else:
-        await message.answer("❌ Отправь картинку, видео или GIF!")
+        media = {"type": "animation", "file_id": message.animation.file_id}
+    
+    if not text and not media:
+        await message.answer("❌ Отправь текст или текст + медиа!")
         return
     
-    await ask_button_text(message, state)
-
-async def ask_button_text(message: Message, state: FSMContext):
+    await state.update_data(text=text, media=media)
+    
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="📝 Свой текст", callback_data="custom_button")],
         [InlineKeyboardButton(text="🎯 Участвовать", callback_data="button_участвовать")],
-        [InlineKeyboardButton(text="🔔 Принять участие", callback_data="button_принять_участие")]
+        [InlineKeyboardButton(text="🔔 Принять участие", callback_data="button_принять_участие")],
+        [InlineKeyboardButton(text="✅ Участвую!", callback_data="button_участвую")]
     ])
+    
     await message.answer(
         "🔘 <b>Текст кнопки</b>\n\n"
-        "Выбери готовый вариант или напиши свой.",
+        "Выберите готовый вариант или напишите свой.",
         parse_mode="HTML",
         reply_markup=keyboard
     )
     await state.set_state(CreateRaffle.waiting_button_text)
 
+# ===== ТЕКСТ КНОПКИ =====
 @dp.callback_query(F.data == "custom_button")
-async def custom_button(callback: types.CallbackQuery, state: FSMContext):
+async def custom_button(callback: CallbackQuery, state: FSMContext):
     await callback.message.answer("✏️ Напиши свой текст для кнопки:")
     await state.set_state(CreateRaffle.waiting_button_text)
     await callback.answer()
 
 @dp.callback_query(F.data.startswith("button_"))
-async def preset_button(callback: types.CallbackQuery, state: FSMContext):
+async def preset_button(callback: CallbackQuery, state: FSMContext):
     text = callback.data.split("_")[1].replace("_", " ")
     await state.update_data(button_text=text)
     await ask_channels(callback.message, state)
@@ -165,13 +142,12 @@ async def get_button_text(message: Message, state: FSMContext):
     await state.update_data(button_text=message.text.strip())
     await ask_channels(message, state)
 
+# ===== КАНАЛЫ ДЛЯ ПОДПИСКИ =====
 async def ask_channels(message: Message, state: FSMContext):
-    data = await state.get_data()
     user_id = message.from_user.id
-    
     channels = user_channels.get(user_id, [])
-    text = "📢 <b>Добавь каналы для подписки</b>\n\n"
     
+    text = "📢 <b>Добавьте каналы</b>\n\n"
     if channels:
         text += "Добавленные каналы:\n"
         for ch in channels:
@@ -179,10 +155,9 @@ async def ask_channels(message: Message, state: FSMContext):
         text += "\n"
     
     text += (
-        "1️⃣ Добавь бота в канал как администратора.\n"
-        "2️⃣ Отправь боту канал в формате <code>@channelname</code>\n"
-        "3️⃣ Или перешли сообщение из канала.\n\n"
-        "📌 Канал, в котором публикуешь конкурс, добавлять <b>не нужно</b>."
+        "1️⃣ Добавьте бота (@Randomazery_bot) в ваш канал как администратора.\n"
+        "2️⃣ Отправьте боту канал в формате <code>@channelname</code>\n\n"
+        "📌 Канал, в котором публикуете конкурс, добавлять <b>не нужно</b>."
     )
     
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
@@ -195,12 +170,11 @@ async def ask_channels(message: Message, state: FSMContext):
 @dp.message(CreateRaffle.waiting_channels)
 async def add_channel(message: Message, state: FSMContext):
     user_id = message.from_user.id
-    text = message.text.strip()
+    channel = message.text.strip()
     
-    if text.startswith("@"):
-        channel = text
-    else:
-        channel = text
+    if not channel.startswith("@"):
+        await message.answer("❌ Канал должен начинаться с @")
+        return
     
     if user_id not in user_channels:
         user_channels[user_id] = []
@@ -209,29 +183,27 @@ async def add_channel(message: Message, state: FSMContext):
         await message.answer(f"❌ Канал {channel} уже добавлен!")
         return
     
-    # Проверяем, есть ли бот в канале
     try:
-        chat = await bot.get_chat(channel)
         member = await bot.get_chat_member(channel, bot.id)
         if member.status not in ["administrator", "creator"]:
-            await message.answer(f"❌ Бот не админ в {channel}! Добавь бота в канал.")
+            await message.answer(f"❌ Бот не админ в {channel}!")
             return
     except:
-        await message.answer(f"❌ Не могу найти канал {channel}. Проверь название.")
+        await message.answer(f"❌ Канал {channel} не найден!")
         return
     
     user_channels[user_id].append(channel)
-    await message.answer(f"✅ Канал {channel} добавлен! Можешь добавить ещё или нажать «Достаточно каналов».")
+    await message.answer(f"✅ Канал {channel} добавлен!")
 
 @dp.callback_query(F.data == "channels_done")
-async def channels_done(callback: types.CallbackQuery, state: FSMContext):
+async def channels_done(callback: CallbackQuery, state: FSMContext):
     user_id = callback.from_user.id
     channels = user_channels.get(user_id, [])
     await state.update_data(channels=channels)
     
     await callback.message.answer(
         "👥 <b>Сколько победителей?</b>\n\n"
-        "Напиши число от 1 до 10.",
+        "Напишите число от 1 до 10.",
         parse_mode="HTML"
     )
     await state.set_state(CreateRaffle.waiting_winners_count)
@@ -252,7 +224,7 @@ async def get_winners_count(message: Message, state: FSMContext):
     
     await message.answer(
         "📢 <b>В каком канале публикуем?</b>\n\n"
-        "Напиши название канала, куда опубликовать пост.\n"
+        "Напишите название канала.\n"
         "Пример: <code>@my_channel</code>",
         parse_mode="HTML"
     )
@@ -280,18 +252,19 @@ async def get_publish_channel(message: Message, state: FSMContext):
     await state.set_state(CreateRaffle.waiting_publish_date)
 
 @dp.callback_query(F.data == "publish_now")
-async def publish_now(callback: types.CallbackQuery, state: FSMContext):
+async def publish_now(callback: CallbackQuery, state: FSMContext):
     await state.update_data(publish_date=datetime.now())
     await ask_end_type(callback.message, state)
     await callback.answer()
 
 @dp.callback_query(F.data == "publish_schedule")
-async def publish_schedule(callback: types.CallbackQuery, state: FSMContext):
+async def publish_schedule(callback: CallbackQuery, state: FSMContext):
     await callback.message.answer(
         "📅 <b>Время публикации</b>\n\n"
-        "Напиши дату и время в формате:\n"
-        "<code>ДД.ММ.ГГГГ ЧЧ:ММ</code>\n\n"
-        "Пример: <code>23.07.2026 14:00</code>\n\n"
+        "Укажите время в формате <code>ДД.ММ.ГГГГ ЧЧ:ММ</code>\n\n"
+        "Примеры:\n"
+        "<code>09.07.2026 22:11</code> - через 10 минут\n"
+        "<code>10.07.2026 22:01</code> - через день\n\n"
         "⏳ Бот живет по времени <b>Москва (GMT+3)</b>",
         parse_mode="HTML"
     )
@@ -308,7 +281,7 @@ async def get_publish_date(message: Message, state: FSMContext):
         await state.update_data(publish_date=date)
         await ask_end_type(message, state)
     except:
-        await message.answer("❌ Неправильный формат! Пример: <code>23.07.2026 14:00</code>", parse_mode="HTML")
+        await message.answer("❌ Неправильный формат!", parse_mode="HTML")
 
 async def ask_end_type(message: Message, state: FSMContext):
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
@@ -323,21 +296,20 @@ async def ask_end_type(message: Message, state: FSMContext):
     await state.set_state(CreateRaffle.waiting_end_type)
 
 @dp.callback_query(F.data == "end_time")
-async def end_time(callback: types.CallbackQuery, state: FSMContext):
+async def end_time(callback: CallbackQuery, state: FSMContext):
     await callback.message.answer(
         "📅 <b>Дата завершения</b>\n\n"
-        "Напиши дату и время в формате:\n"
-        "<code>ДД.ММ.ГГГГ ЧЧ:ММ</code>",
+        "Напишите дату в формате <code>ДД.ММ.ГГГГ ЧЧ:ММ</code>",
         parse_mode="HTML"
     )
     await state.set_state(CreateRaffle.waiting_end_date)
     await callback.answer()
 
 @dp.callback_query(F.data == "end_participants")
-async def end_participants(callback: types.CallbackQuery, state: FSMContext):
+async def end_participants(callback: CallbackQuery, state: FSMContext):
     await callback.message.answer(
         "👥 <b>Кол-во участников</b>\n\n"
-        "Напиши число — когда столько участников наберётся, конкурс завершится.",
+        "Напишите число — когда столько наберётся, конкурс завершится.",
         parse_mode="HTML"
     )
     await state.set_state(CreateRaffle.waiting_end_participants)
@@ -348,14 +320,13 @@ async def get_end_date(message: Message, state: FSMContext):
     try:
         date = datetime.strptime(message.text.strip(), "%d.%m.%Y %H:%M")
         data = await state.get_data()
-        publish_date = data.get("publish_date")
-        if date < publish_date:
+        if date < data.get("publish_date"):
             await message.answer("❌ Дата завершения должна быть позже публикации!")
             return
         await state.update_data(end_date=date)
         await finish_raffle(message, state)
     except:
-        await message.answer("❌ Неправильный формат! Пример: <code>23.07.2026 14:00</code>", parse_mode="HTML")
+        await message.answer("❌ Неправильный формат!")
 
 @dp.message(CreateRaffle.waiting_end_participants)
 async def get_end_participants(message: Message, state: FSMContext):
@@ -365,6 +336,7 @@ async def get_end_participants(message: Message, state: FSMContext):
     await state.update_data(end_participants=int(message.text))
     await finish_raffle(message, state)
 
+# ===== ФИНИШ СОЗДАНИЯ =====
 async def finish_raffle(message: Message, state: FSMContext):
     global raffle_counter, raffles
     
@@ -391,7 +363,6 @@ async def finish_raffle(message: Message, state: FSMContext):
     
     await state.clear()
     
-    # Показываем превью
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="💾 Сохранить конкурс", callback_data=f"save_raffle_{raffle_counter}")],
         [InlineKeyboardButton(text="❌ Отмена", callback_data="cancel_raffle")]
@@ -399,7 +370,7 @@ async def finish_raffle(message: Message, state: FSMContext):
     
     await message.answer(
         f"✅ <b>Конкурс готов!</b>\n\n"
-        f"📝 Текст: {data.get('text')[:100]}...\n"
+        f"📝 Текст: {data.get('text', '')[:100]}...\n"
         f"👥 Победителей: {data.get('winners_count')}\n"
         f"📢 Канал: {data.get('publish_channel')}\n"
         f"⏳ Окончание: {data.get('end_date') or 'по участникам'}\n\n"
@@ -409,7 +380,7 @@ async def finish_raffle(message: Message, state: FSMContext):
     )
 
 @dp.callback_query(F.data.startswith("save_raffle_"))
-async def save_raffle(callback: types.CallbackQuery):
+async def save_raffle(callback: CallbackQuery):
     raffle_id = int(callback.data.split("_")[2])
     raffle = raffles.get(raffle_id)
     
@@ -418,16 +389,15 @@ async def save_raffle(callback: types.CallbackQuery):
         return
     
     raffle["status"] = "active"
-    
-    # Публикуем
     await publish_raffle(callback.message, raffle_id)
     await callback.answer()
 
 @dp.callback_query(F.data == "cancel_raffle")
-async def cancel_raffle(callback: types.CallbackQuery):
+async def cancel_raffle(callback: CallbackQuery):
     await callback.message.answer("❌ Создание отменено.")
     await callback.answer()
 
+# ===== ПУБЛИКАЦИЯ В КАНАЛ =====
 async def publish_raffle(message: Message, raffle_id: int):
     raffle = raffles[raffle_id]
     
@@ -459,7 +429,7 @@ async def publish_raffle(message: Message, raffle_id: int):
                     parse_mode="HTML",
                     reply_markup=keyboard
                 )
-            else:
+            elif raffle["media"]["type"] == "animation":
                 msg = await bot.send_animation(
                     chat_id=raffle["publish_channel"],
                     animation=raffle["media"]["file_id"],
@@ -481,9 +451,9 @@ async def publish_raffle(message: Message, raffle_id: int):
     except Exception as e:
         await message.answer(f"❌ Ошибка публикации: {e}")
 
-# ===== УЧАСТИЕ =====
+# ===== УЧАСТИЕ В КОНКУРСЕ =====
 @dp.callback_query(F.data.startswith("join_"))
-async def join_raffle(callback: types.CallbackQuery):
+async def join_raffle(callback: CallbackQuery):
     raffle_id = int(callback.data.split("_")[1])
     raffle = raffles.get(raffle_id)
     
@@ -491,7 +461,6 @@ async def join_raffle(callback: types.CallbackQuery):
         await callback.answer("❌ Конкурс уже завершён!", show_alert=True)
         return
     
-    # Проверка подписки на все каналы
     for channel in raffle["channels"]:
         try:
             status = await bot.get_chat_member(channel, callback.from_user.id)
@@ -517,7 +486,6 @@ async def join_raffle(callback: types.CallbackQuery):
         "first_name": first_name
     })
     
-    # Проверка завершения по участникам
     if raffle.get("end_participants") and len(raffle["participants"]) >= raffle["end_participants"]:
         raffle["status"] = "finished"
         await auto_finish(raffle_id)
@@ -526,16 +494,13 @@ async def join_raffle(callback: types.CallbackQuery):
 
 async def auto_finish(raffle_id: int):
     raffle = raffles[raffle_id]
-    if not raffle["winner"]:
+    if not raffle["winner"] and raffle["participants"]:
         winner = random.choice(raffle["participants"])
         raffle["winner"] = winner
-        
         try:
             await bot.send_message(
                 chat_id=raffle["chat_id"],
-                text=f"🎉 <b>КОНКУРС ЗАВЕРШЁН!</b>\n\n"
-                     f"🏆 Победитель: @{winner['username']} ({winner['first_name']})\n\n"
-                     f"Поздравляем! 🎊",
+                text=f"🎉 <b>КОНКУРС ЗАВЕРШЁН!</b>\n\n🏆 Победитель: @{winner['username']} ({winner['first_name']})\n\nПоздравляем! 🎊",
                 parse_mode="HTML"
             )
         except:
@@ -558,14 +523,13 @@ async def admin_panel(message: Message):
     await message.answer(
         f"🔐 <b>Админ-панель</b>\n\n"
         f"📊 Всего конкурсов: {len(raffles)}\n"
-        f"✅ Активных: {active}\n"
-        f"👥 Твой ID: {message.from_user.id}",
+        f"✅ Активных: {active}",
         parse_mode="HTML",
         reply_markup=keyboard
     )
 
 @dp.callback_query(F.data == "admin_all")
-async def admin_all(callback: types.CallbackQuery):
+async def admin_all(callback: CallbackQuery):
     if callback.from_user.id != ADMIN_ID:
         await callback.answer("❌ Нет прав!", show_alert=True)
         return
@@ -579,16 +543,13 @@ async def admin_all(callback: types.CallbackQuery):
     for rid, r in raffles.items():
         text += f"#{rid}: {r.get('publish_channel', 'неизвестно')}\n"
         text += f"   👥 Участников: {len(r['participants'])}\n"
-        text += f"   ❗️ Статус: {r['status']}\n"
-        if r.get("winner"):
-            text += f"   🏆 Победитель: @{r['winner']['username']}\n"
-        text += "\n"
+        text += f"   ❗️ Статус: {r['status']}\n\n"
     
     await callback.message.answer(text, parse_mode="HTML")
     await callback.answer()
 
 @dp.callback_query(F.data == "admin_pick")
-async def admin_pick(callback: types.CallbackQuery):
+async def admin_pick(callback: CallbackQuery):
     if callback.from_user.id != ADMIN_ID:
         await callback.answer("❌ Нет прав!", show_alert=True)
         return
@@ -632,7 +593,6 @@ async def handle_admin_pick(message: Message):
     raffle["winner"] = winner
     raffle["status"] = "finished"
     
-    # Меняем кнопку
     try:
         keyboard = InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="🏆 Завершён", callback_data="finished")]
@@ -646,20 +606,14 @@ async def handle_admin_pick(message: Message):
         pass
     
     await message.answer(
-        f"🎉 <b>ПОБЕДИТЕЛЬ</b> 🎉\n\n"
-        f"🏆 @{winner['username']} ({winner['first_name']})\n"
-        f"🎁 Приз: {raffle.get('prizes', ['Главный приз'])[0]}\n\n"
-        f"Поздравляем! 🎊",
+        f"🎉 <b>ПОБЕДИТЕЛЬ</b> 🎉\n\n🏆 @{winner['username']} ({winner['first_name']})\n\nПоздравляем! 🎊",
         parse_mode="HTML"
     )
     
-    # Оповещаем в канал
     try:
         await bot.send_message(
             chat_id=raffle["chat_id"],
-            text=f"🎉 <b>КОНКУРС ЗАВЕРШЁН!</b>\n\n"
-                 f"🏆 Победитель: @{winner['username']} ({winner['first_name']})\n\n"
-                 f"Поздравляем! 🎊",
+            text=f"🎉 <b>КОНКУРС ЗАВЕРШЁН!</b>\n\n🏆 Победитель: @{winner['username']} ({winner['first_name']})\n\nПоздравляем! 🎊",
             parse_mode="HTML"
         )
     except:
@@ -667,7 +621,7 @@ async def handle_admin_pick(message: Message):
 
 # ===== МОИ КОНКУРСЫ =====
 @dp.callback_query(F.data == "my_raffles")
-async def my_raffles(callback: types.CallbackQuery):
+async def my_raffles(callback: CallbackQuery):
     my = [r for r in raffles.values() if r["creator"] == callback.from_user.id]
     
     if not my:
@@ -680,25 +634,19 @@ async def my_raffles(callback: types.CallbackQuery):
         status = {"active": "✅ Активен", "finished": "🏁 Завершён", "draft": "📝 Черновик"}.get(r["status"], r["status"])
         text += f"📢 {r.get('publish_channel', 'неизвестно')}\n"
         text += f"   👥 Участников: {len(r['participants'])}\n"
-        text += f"   ❗️ Статус: {status}\n"
-        if r.get("winner"):
-            text += f"   🏆 Победитель: @{r['winner']['username']}\n"
-        text += "\n"
+        text += f"   ❗️ Статус: {status}\n\n"
     
     await callback.message.answer(text, parse_mode="HTML")
     await callback.answer()
 
 # ===== МОИ КАНАЛЫ =====
 @dp.callback_query(F.data == "my_channels")
-async def my_channels(callback: types.CallbackQuery):
+async def my_channels(callback: CallbackQuery):
     user_id = callback.from_user.id
     channels = user_channels.get(user_id, [])
     
     if not channels:
-        await callback.message.answer(
-            "📢 У тебя нет добавленных каналов.\n\n"
-            "Чтобы добавить канал, создай конкурс — бот попросит добавить каналы."
-        )
+        await callback.message.answer("📢 У тебя нет добавленных каналов.")
         await callback.answer()
         return
     
@@ -714,13 +662,11 @@ async def my_channels(callback: types.CallbackQuery):
     await callback.answer()
 
 @dp.callback_query(F.data == "add_channel")
-async def add_channel(callback: types.CallbackQuery):
-    await callback.message.answer(
-        "📢 Отправь название канала в формате <code>@channelname</code>",
-        parse_mode="HTML"
-    )
+async def add_channel(callback: CallbackQuery):
+    await callback.message.answer("📢 Отправь название канала в формате <code>@channelname</code>", parse_mode="HTML")
     await callback.answer()
 
+# ===== ДОБАВЛЕНИЕ КАНАЛА (ОБРАБОТЧИК) =====
 @dp.message()
 async def handle_add_channel(message: Message):
     user_id = message.from_user.id
@@ -737,7 +683,6 @@ async def handle_add_channel(message: Message):
         return
     
     try:
-        chat = await bot.get_chat(text)
         member = await bot.get_chat_member(text, bot.id)
         if member.status not in ["administrator", "creator"]:
             await message.answer(f"❌ Бот не админ в {text}!")
@@ -751,10 +696,10 @@ async def handle_add_channel(message: Message):
 
 # ===== ПОДДЕРЖКА =====
 @dp.callback_query(F.data == "support")
-async def support(callback: types.CallbackQuery):
+async def support(callback: CallbackQuery):
     await callback.message.answer(
-        "🆘 <b>Поддержка</b>\n\n"
-        "По всем вопросам пиши: @your_support\n\n"
+        "🆘 <b>Служба поддержки</b>\n\n"
+        "По всем вопросам пишите: @your_support\n\n"
         "📌 Бот создан для проведения честных конкурсов.",
         parse_mode="HTML"
     )
