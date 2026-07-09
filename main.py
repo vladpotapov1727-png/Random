@@ -24,7 +24,7 @@ def keep_alive():
     t.start()
 
 # ===== НАСТРОЙКИ БОТА =====
-TOKEN = os.environ.get('8769346438:AAGwRDxzGszAVmRhAT8z7pFfaRCJDi6jHzU')
+TOKEN = os.environ.get('BOT_TOKEN')
 if not TOKEN:
     raise ValueError("BOT_TOKEN не найден! Добавь его в переменные окружения на Railway.")
 
@@ -32,7 +32,7 @@ bot = Bot(token=TOKEN)
 dp = Dispatcher()
 
 # ===== ДАННЫЕ =====
-ADMIN_ID = 7197233783  # ТВОЙ ID (замени на свой)
+ADMIN_ID = 7197233783  # ТВОЙ ID
 
 # Твои личные розыгрыши
 my_raffles = {
@@ -154,7 +154,6 @@ async def join_raffle(callback: types.CallbackQuery):
         await callback.answer("❌ Розыгрыш уже завершён!", show_alert=True)
         return
     
-    # Проверка подписки
     try:
         status = await bot.get_chat_member(raffle["channel"], callback.from_user.id)
         if status.status in ["left", "kicked"]:
@@ -186,11 +185,9 @@ async def join_raffle(callback: types.CallbackQuery):
 async def handle_text(message: types.Message):
     global raffle_counter, raffles, my_raffles
     
-    # Если сообщение от админа
     if message.from_user.id == ADMIN_ID:
         text = message.text.strip()
         
-        # Выбор победителей (если число)
         if text.isdigit():
             count = int(text)
             if 1 <= count <= 10 and len(my_raffles["participants"]) > 0:
@@ -208,7 +205,6 @@ async def handle_text(message: types.Message):
                 my_raffles["participants"] = []
                 return
         
-        # Настройка призов
         if "1 место" in text and "2 место" in text:
             try:
                 parts = text.split(",")
@@ -224,7 +220,6 @@ async def handle_text(message: types.Message):
                 await message.answer("❌ Неправильный формат!")
             return
     
-    # Создание розыгрыша пользователем
     if " @" in message.text and "ДД.ММ.ГГГГ" not in message.text:
         try:
             parts = message.text.split(" ")
@@ -345,5 +340,5 @@ async def main():
     await dp.start_polling(bot, drop_pending_updates=True)
 
 if __name__ == "__main__":
-    keep_alive()  # Запускаем веб-сервер (чтобы Railway не убивал бота)
+    keep_alive()
     asyncio.run(main())
