@@ -6,7 +6,7 @@ from aiogram import Bot, Dispatcher, types, F
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.filters import Command
 
-TOKEN = os.environ.get('BOT_TOKEN')
+TOKEN = os.environ.get('8769346438:AAGwRDxzGszAVmRhAT8z7pFfaRCJDi6jHzU')
 if not TOKEN:
     raise ValueError("BOT_TOKEN не найден!")
 
