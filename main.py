@@ -4,7 +4,7 @@ import random
 import sqlite3
 import json
 from datetime import datetime, timedelta
-import pytz
+from zoneinfo import ZoneInfo
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.types import (
     InlineKeyboardMarkup, InlineKeyboardButton,
@@ -34,7 +34,7 @@ def keep_alive():
     t.start()
 
 # ===== НАСТРОЙКИ ВРЕМЕНИ (НОВОСИБИРСК GMT+7) =====
-NEWSIB_TIMEZONE = pytz.timezone('Asia/Novosibirsk')
+NEWSIB_TIMEZONE = ZoneInfo('Asia/Novosibirsk')
 
 def get_now():
     """Текущее время по Новосибирску (GMT+7)"""
@@ -46,8 +46,12 @@ def format_datetime(dt):
 
 def parse_datetime(date_str):
     """Парсит дату из строки как Новосибирское время"""
-    dt = datetime.strptime(date_str, "%d.%m.%Y %H:%M")
-    return NEWSIB_TIMEZONE.localize(dt)
+    try:
+        date_str = date_str.strip()
+        dt = datetime.strptime(date_str, "%d.%m.%Y %H:%M")
+        return dt.replace(tzinfo=NEWSIB_TIMEZONE)
+    except ValueError:
+        return None
 
 # ===== НАСТРОЙКИ БОТА =====
 TOKEN = os.environ.get('BOT_TOKEN')
@@ -513,15 +517,15 @@ async def publish_schedule(callback: CallbackQuery, state: FSMContext):
 
 @dp.message(CreateRaffle.waiting_publish_date)
 async def get_publish_date(message: Message, state: FSMContext):
-    try:
-        dt = parse_datetime(message.text.strip())
-        if dt < get_now():
-            await message.answer(f"❌ Дата должна быть в будущем! Сейчас {format_datetime(get_now())}")
-            return
-        await state.update_data(publish_date=message.text.strip())
-        await ask_end_type(message, state)
-    except:
+    dt = parse_datetime(message.text.strip())
+    if dt is None:
         await message.answer("❌ Неправильный формат! Пример: <code>10.07.2026 15:00</code>", parse_mode="HTML")
+        return
+    if dt < get_now():
+        await message.answer(f"❌ Дата должна быть в будущем! Сейчас {format_datetime(get_now())}")
+        return
+    await state.update_data(publish_date=message.text.strip())
+    await ask_end_type(message, state)
 
 async def ask_end_type(message: Message, state: FSMContext):
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
@@ -561,15 +565,15 @@ async def end_participants(callback: CallbackQuery, state: FSMContext):
 
 @dp.message(CreateRaffle.waiting_end_date)
 async def get_end_date(message: Message, state: FSMContext):
-    try:
-        dt = parse_datetime(message.text.strip())
-        if dt < get_now():
-            await message.answer(f"❌ Дата должна быть в будущем! Сейчас {format_datetime(get_now())}")
-            return
-        await state.update_data(end_date=message.text.strip())
-        await finish_raffle(message, state)
-    except:
+    dt = parse_datetime(message.text.strip())
+    if dt is None:
         await message.answer("❌ Неправильный формат! Пример: <code>10.07.2026 15:00</code>", parse_mode="HTML")
+        return
+    if dt < get_now():
+        await message.answer(f"❌ Дата должна быть в будущем! Сейчас {format_datetime(get_now())}")
+        return
+    await state.update_data(end_date=message.text.strip())
+    await finish_raffle(message, state)
 
 @dp.message(CreateRaffle.waiting_end_participants)
 async def get_end_participants(message: Message, state: FSMContext):
@@ -940,20 +944,20 @@ async def check_raffles_time():
         now = get_now().timestamp()
         for raffle_id, raffle in raffles.items():
             if raffle.get("status") == "active" and raffle.get("end_date") and not raffle.get("announced"):
-                try:
-                    end_date = parse_datetime(raffle["end_date"]).timestamp()
-                    if now >= end_date:
-                        await announce_winner(raffle_id)
-                except:
-                    pass
+                dt = parse_datetime(raffle["end_date"])
+                if dt is None:
+                    continue
+                if now >= dt.timestamp():
+                    await announce_winner(raffle_id)
         await asyncio.sleep(60)
 
 # ===== ЗАПУСК =====
 async def main():
     print(f"🤖 Бот giveawayrnd_bot запущен! Время Новосибирское (GMT+7): {format_datetime(get_now())}")
+    await bot.delete_webhook(drop_pending_updates=True)  # Сброс webhook
     await send_start_notification()
     asyncio.create_task(check_raffles_time())
-    await dp.start_polling(bot, drop_pending_updates=True)
+    await dp.start_polling(bot, skip_updates=True)
 
 if __name__ == "__main__":
     keep_alive()
