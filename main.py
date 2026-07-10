@@ -643,7 +643,7 @@ async def finish_raffle(message: Message, state: FSMContext):
     )
 
 @dp.callback_query(F.data.startswith("save_raffle_"))
-async def save_raffle(callback: CallbackQuery):
+async def save_raffle_callback(callback: CallbackQuery):
     raffle_id = int(callback.data.split("_")[2])
     raffle = raffles.get(raffle_id)
     if not raffle:
