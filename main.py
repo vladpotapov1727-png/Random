@@ -242,6 +242,15 @@ class CreateRaffle(StatesGroup):
 class BroadcastStates(StatesGroup):
     waiting_text = State()
 
+# ===== КОМАНДА ОТМЕНЫ =====
+@dp.message(Command("cancel"))
+async def cancel(message: Message, state: FSMContext):
+    await state.clear()
+    await message.answer(
+        "✅ Действие отменено. Начните заново с /start",
+        reply_markup=main_keyboard()
+    )
+
 # ===== УВЕДОМЛЕНИЕ ПРИ ЗАПУСКЕ =====
 async def send_start_notification():
     try:
@@ -260,7 +269,8 @@ async def send_start_notification():
 
 # ===== /start =====
 @dp.message(Command("start"))
-async def start(message: Message):
+async def start(message: Message, state: FSMContext):
+    await state.clear()
     await message.answer(
         "🎲 <b>GiveawayRND</b>\n\n"
         "Бот для проведения конкурсов с проверкой подписки!\n\n"
@@ -277,6 +287,7 @@ async def start(message: Message):
 # ===== ОБРАБОТЧИКИ КНОПОК (ВНИЗУ) =====
 @dp.message(F.text == "📝 Создать конкурс")
 async def create_raffle_button(message: Message, state: FSMContext):
+    await state.clear()
     await message.answer(
         "📝 <b>Создание конкурса</b>\n\n"
         "Отправьте текст для конкурса.\n"
@@ -807,7 +818,7 @@ async def admin_pick(callback: CallbackQuery):
     await callback.answer()
 
 @dp.message()
-async def handle_admin_pick(message: Message):
+async def handle_admin_pick(message: Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID:
         return
     if not message.text.isdigit():
@@ -954,7 +965,7 @@ async def check_raffles_time():
 # ===== ЗАПУСК =====
 async def main():
     print(f"🤖 Бот giveawayrnd_bot запущен! Время Новосибирское (GMT+7): {format_datetime(get_now())}")
-    await bot.delete_webhook(drop_pending_updates=True)  # Сброс webhook
+    await bot.delete_webhook(drop_pending_updates=True)
     await send_start_notification()
     asyncio.create_task(check_raffles_time())
     await dp.start_polling(bot, skip_updates=True)
