@@ -4,6 +4,7 @@ import random
 import sqlite3
 import json
 from datetime import datetime, timedelta
+import pytz
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.types import (
     InlineKeyboardMarkup, InlineKeyboardButton,
@@ -23,7 +24,7 @@ app = Flask('')
 
 @app.route('/')
 def home():
-    return "🤖 Бот Randomazer работает 24/7!"
+    return "🤖 Бот giveawayrnd_bot работает 24/7!"
 
 def run():
     app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 8080)))
@@ -32,7 +33,23 @@ def keep_alive():
     t = Thread(target=run)
     t.start()
 
-# ===== НАСТРОЙКИ =====
+# ===== НАСТРОЙКИ ВРЕМЕНИ (НОВОСИБИРСК GMT+7) =====
+NEWSIB_TIMEZONE = pytz.timezone('Asia/Novosibirsk')
+
+def get_now():
+    """Текущее время по Новосибирску (GMT+7)"""
+    return datetime.now(NEWSIB_TIMEZONE)
+
+def format_datetime(dt):
+    """Форматирует дату для показа пользователю"""
+    return dt.strftime("%d.%m.%Y %H:%M")
+
+def parse_datetime(date_str):
+    """Парсит дату из строки как Новосибирское время"""
+    dt = datetime.strptime(date_str, "%d.%m.%Y %H:%M")
+    return NEWSIB_TIMEZONE.localize(dt)
+
+# ===== НАСТРОЙКИ БОТА =====
 TOKEN = os.environ.get('BOT_TOKEN')
 if not TOKEN:
     raise ValueError("BOT_TOKEN не найден! Добавь его в переменные окружения.")
@@ -50,7 +67,6 @@ def init_db():
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     
-    # Таблица розыгрышей
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS raffles (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -75,7 +91,6 @@ def init_db():
         )
     """)
     
-    # Таблица каналов пользователей
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS user_channels (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -226,12 +241,14 @@ class BroadcastStates(StatesGroup):
 # ===== УВЕДОМЛЕНИЕ ПРИ ЗАПУСКЕ =====
 async def send_start_notification():
     try:
+        now = get_now()
         await bot.send_message(
             ADMIN_ID,
-            f"✅ <b>Бот Randomazer запущен!</b>\n\n"
-            f"📅 Время: {datetime.now().strftime('%d.%m.%Y %H:%M:%S')}\n"
+            f"✅ <b>Бот giveawayrnd_bot запущен!</b>\n\n"
+            f"📅 Время (Новосибирск): {format_datetime(now)}\n"
             f"📊 Конкурсов в БД: {len(raffles)}\n"
-            f"🤖 Бот работает 24/7!",
+            f"🤖 Бот работает 24/7!\n\n"
+            f"📢 Наш бот: @giveawayrnd_bot",
             parse_mode="HTML"
         )
     except:
@@ -241,12 +258,14 @@ async def send_start_notification():
 @dp.message(Command("start"))
 async def start(message: Message):
     await message.answer(
-        "🎲 <b>Randomazer</b>\n\n"
+        "🎲 <b>GiveawayRND</b>\n\n"
         "Бот для проведения конкурсов с проверкой подписки!\n\n"
         "🔹 <b>Создать конкурс</b> — бот задаст вопросы.\n"
         "🔹 <b>Мои конкурсы</b> — список твоих конкурсов.\n"
         "🔹 <b>Мои каналы/чаты</b> — добавленные каналы.\n"
-        "🔹 <b>Служба поддержки</b> — помощь.",
+        "🔹 <b>Служба поддержки</b> — помощь.\n\n"
+        "⏳ <b>Время Новосибирское (GMT+7)</b>\n"
+        "📢 Наш бот: @giveawayrnd_bot",
         parse_mode="HTML",
         reply_markup=main_keyboard()
     )
@@ -261,7 +280,7 @@ async def create_raffle_button(message: Message, state: FSMContext):
         "📌 Вы можете использовать только <b>1 медиафайл</b>\n\n"
         "Бот для проведения конкурсов полностью бесплатный и прозрачный, ему будет приятно, "
         "если в конкурсном посте Вы укажите на него ссылку, спасибо.\n"
-        "@Randomazery_bot",
+        "@giveawayrnd_bot",
         parse_mode="HTML"
     )
     await state.set_state(CreateRaffle.waiting_post)
@@ -292,6 +311,7 @@ async def my_channels_button(message: Message):
     text = "📢 <b>Мои каналы</b>\n\n"
     for ch in channels:
         text += f"✅ {ch}\n"
+    text += f"\n📢 Наш бот: @giveawayrnd_bot"
     await message.answer(text, parse_mode="HTML", reply_markup=main_keyboard())
 
 @dp.message(F.text == "🆘 Служба поддержки")
@@ -299,7 +319,8 @@ async def support_button(message: Message):
     await message.answer(
         "🆘 <b>Служба поддержки</b>\n\n"
         "По всем вопросам пишите: @your_support\n\n"
-        "📌 Бот создан для проведения честных конкурсов.",
+        "📌 Бот создан для проведения честных конкурсов.\n"
+        "📢 Наш бот: @giveawayrnd_bot",
         parse_mode="HTML",
         reply_markup=main_keyboard()
     )
@@ -332,7 +353,8 @@ async def get_post(message: Message, state: FSMContext):
     
     await message.answer(
         "🔘 <b>Текст кнопки</b>\n\n"
-        "Выберите готовый вариант или напишите свой.",
+        "Выберите готовый вариант или напишите свой.\n\n"
+        "📢 Наш бот: @giveawayrnd_bot",
         parse_mode="HTML",
         reply_markup=keyboard
     )
@@ -369,9 +391,10 @@ async def ask_channels(message: Message, state: FSMContext):
         text += "\n"
     
     text += (
-        "1️⃣ Добавьте бота (@Randomazery_bot) в ваш канал как администратора.\n"
+        "1️⃣ Добавьте бота (@giveawayrnd_bot) в ваш канал как администратора.\n"
         "2️⃣ Отправьте боту канал в формате <code>@channelname</code>\n\n"
-        "📌 Канал, в котором публикуете конкурс, добавлять <b>не нужно</b>."
+        "📌 Канал, в котором публикуете конкурс, добавлять <b>не нужно</b>.\n\n"
+        "📢 Наш бот: @giveawayrnd_bot"
     )
     
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
@@ -408,7 +431,7 @@ async def add_channel(message: Message, state: FSMContext):
     
     user_channels[user_id].append(channel)
     save_channels(user_id, user_channels[user_id])
-    await message.answer(f"✅ Канал {channel} добавлен!")
+    await message.answer(f"✅ Канал {channel} добавлен!\n\n📢 Наш бот: @giveawayrnd_bot")
 
 @dp.callback_query(F.data == "channels_done")
 async def channels_done(callback: CallbackQuery, state: FSMContext):
@@ -418,7 +441,8 @@ async def channels_done(callback: CallbackQuery, state: FSMContext):
     
     await callback.message.answer(
         "👥 <b>Сколько победителей?</b>\n\n"
-        "Напишите число от 1 до 10.",
+        "Напишите число от 1 до 10.\n\n"
+        "📢 Наш бот: @giveawayrnd_bot",
         parse_mode="HTML"
     )
     await state.set_state(CreateRaffle.waiting_winners_count)
@@ -438,7 +462,8 @@ async def get_winners_count(message: Message, state: FSMContext):
     await message.answer(
         "📢 <b>В каком канале публикуем?</b>\n\n"
         "Напишите название канала.\n"
-        "Пример: <code>@my_channel</code>",
+        "Пример: <code>@my_channel</code>\n\n"
+        "📢 Наш бот: @giveawayrnd_bot",
         parse_mode="HTML"
     )
     await state.set_state(CreateRaffle.waiting_publish_channel)
@@ -457,7 +482,8 @@ async def get_publish_channel(message: Message, state: FSMContext):
     ])
     
     await message.answer(
-        "📅 <b>Когда публикуем?</b>",
+        "📅 <b>Когда публикуем?</b>\n\n"
+        "📢 Наш бот: @giveawayrnd_bot",
         parse_mode="HTML",
         reply_markup=keyboard
     )
@@ -465,7 +491,7 @@ async def get_publish_channel(message: Message, state: FSMContext):
 
 @dp.callback_query(F.data == "publish_now")
 async def publish_now(callback: CallbackQuery, state: FSMContext):
-    await state.update_data(publish_date=datetime.now().strftime("%d.%m.%Y %H:%M:%S"))
+    await state.update_data(publish_date=format_datetime(get_now()))
     await ask_end_type(callback.message, state)
     await callback.answer()
 
@@ -475,9 +501,11 @@ async def publish_schedule(callback: CallbackQuery, state: FSMContext):
         "📅 <b>Время публикации</b>\n\n"
         "Укажите время в формате <code>ДД.ММ.ГГГГ ЧЧ:ММ</code>\n\n"
         "Примеры:\n"
-        "<code>09.07.2026 22:11</code> - через 10 минут\n"
-        "<code>10.07.2026 22:01</code> - через день\n\n"
-        "⏳ Бот живет по времени <b>Москва (GMT+3)</b>",
+        f"<code>{format_datetime(get_now() + timedelta(minutes=10))}</code> - через 10 минут\n"
+        f"<code>{format_datetime(get_now() + timedelta(hours=1))}</code> - через час\n"
+        f"<code>{format_datetime(get_now() + timedelta(days=1))}</code> - через день\n\n"
+        "⏳ <b>Время Новосибирское (GMT+7)</b>\n\n"
+        "📢 Наш бот: @giveawayrnd_bot",
         parse_mode="HTML"
     )
     await state.set_state(CreateRaffle.waiting_publish_date)
@@ -486,9 +514,9 @@ async def publish_schedule(callback: CallbackQuery, state: FSMContext):
 @dp.message(CreateRaffle.waiting_publish_date)
 async def get_publish_date(message: Message, state: FSMContext):
     try:
-        date = datetime.strptime(message.text.strip(), "%d.%m.%Y %H:%M")
-        if date < datetime.now():
-            await message.answer("❌ Дата должна быть в будущем!")
+        dt = parse_datetime(message.text.strip())
+        if dt < get_now():
+            await message.answer(f"❌ Дата должна быть в будущем! Сейчас {format_datetime(get_now())}")
             return
         await state.update_data(publish_date=message.text.strip())
         await ask_end_type(message, state)
@@ -501,7 +529,8 @@ async def ask_end_type(message: Message, state: FSMContext):
         [InlineKeyboardButton(text="👥 По кол-ву участников", callback_data="end_participants")]
     ])
     await message.answer(
-        "⏳ <b>Как завершить конкурс?</b>",
+        "⏳ <b>Как завершить конкурс?</b>\n\n"
+        "📢 Наш бот: @giveawayrnd_bot",
         parse_mode="HTML",
         reply_markup=keyboard
     )
@@ -511,7 +540,9 @@ async def ask_end_type(message: Message, state: FSMContext):
 async def end_time(callback: CallbackQuery, state: FSMContext):
     await callback.message.answer(
         "📅 <b>Дата завершения</b>\n\n"
-        "Напишите дату в формате <code>ДД.ММ.ГГГГ ЧЧ:ММ</code>",
+        "Напишите дату в формате <code>ДД.ММ.ГГГГ ЧЧ:ММ</code>\n\n"
+        f"⏳ Сейчас: {format_datetime(get_now())} (Новосибирск)\n\n"
+        "📢 Наш бот: @giveawayrnd_bot",
         parse_mode="HTML"
     )
     await state.set_state(CreateRaffle.waiting_end_date)
@@ -521,7 +552,8 @@ async def end_time(callback: CallbackQuery, state: FSMContext):
 async def end_participants(callback: CallbackQuery, state: FSMContext):
     await callback.message.answer(
         "👥 <b>Кол-во участников</b>\n\n"
-        "Напишите число — когда столько наберётся, конкурс завершится.",
+        "Напишите число — когда столько наберётся, конкурс завершится.\n\n"
+        "📢 Наш бот: @giveawayrnd_bot",
         parse_mode="HTML"
     )
     await state.set_state(CreateRaffle.waiting_end_participants)
@@ -530,11 +562,14 @@ async def end_participants(callback: CallbackQuery, state: FSMContext):
 @dp.message(CreateRaffle.waiting_end_date)
 async def get_end_date(message: Message, state: FSMContext):
     try:
-        date = datetime.strptime(message.text.strip(), "%d.%m.%Y %H:%M")
+        dt = parse_datetime(message.text.strip())
+        if dt < get_now():
+            await message.answer(f"❌ Дата должна быть в будущем! Сейчас {format_datetime(get_now())}")
+            return
         await state.update_data(end_date=message.text.strip())
         await finish_raffle(message, state)
     except:
-        await message.answer("❌ Неправильный формат!")
+        await message.answer("❌ Неправильный формат! Пример: <code>10.07.2026 15:00</code>", parse_mode="HTML")
 
 @dp.message(CreateRaffle.waiting_end_participants)
 async def get_end_participants(message: Message, state: FSMContext):
@@ -585,7 +620,9 @@ async def finish_raffle(message: Message, state: FSMContext):
         f"👥 Победителей: {data.get('winners_count')}\n"
         f"📢 Канал: {data.get('publish_channel')}\n"
         f"⏳ Окончание: {data.get('end_date') or 'по участникам'}\n\n"
-        f"🔘 Проверь всё и сохрани.",
+        f"⏳ Время Новосибирское (GMT+7)\n"
+        f"🔘 Проверь всё и сохрани.\n\n"
+        f"📢 Наш бот: @giveawayrnd_bot",
         parse_mode="HTML",
         reply_markup=keyboard
     )
@@ -618,6 +655,8 @@ async def publish_raffle(message: Message, raffle_id: int):
         text += "\n\n📢 <b>Подпишись на каналы:</b>\n"
         for ch in raffle["channels"]:
             text += f"🔹 {ch}\n"
+    
+    text += f"\n\n📢 Бот для конкурсов: @giveawayrnd_bot"
     
     try:
         if raffle.get("media"):
@@ -656,7 +695,7 @@ async def publish_raffle(message: Message, raffle_id: int):
         raffle["message_id"] = msg.message_id
         raffle["chat_id"] = msg.chat.id
         save_raffle(raffle_id, raffle)
-        await message.answer(f"✅ Конкурс опубликован в {raffle['publish_channel']}!")
+        await message.answer(f"✅ Конкурс опубликован в {raffle['publish_channel']}!\n\n📢 @giveawayrnd_bot")
     except Exception as e:
         await message.answer(f"❌ Ошибка публикации: {e}")
 
@@ -669,7 +708,6 @@ async def join_raffle(callback: CallbackQuery):
         await callback.answer("❌ Конкурс уже завершён!", show_alert=True)
         return
     
-    # Проверка подписки
     for channel in raffle.get("channels", []):
         try:
             status = await bot.get_chat_member(channel, callback.from_user.id)
@@ -696,7 +734,6 @@ async def join_raffle(callback: CallbackQuery):
     })
     save_raffle(raffle_id, raffle)
     
-    # Проверка завершения по участникам
     if raffle.get("end_participants") and len(raffle["participants"]) >= raffle["end_participants"]:
         await announce_winner(raffle_id, from_join=True)
     
@@ -715,9 +752,11 @@ async def admin_panel(message: Message):
         [InlineKeyboardButton(text="📢 Рассылка", callback_data="admin_broadcast")]
     ])
     await message.answer(
-        f"🔐 <b>Админ-панель</b>\n\n"
+        f"🔐 <b>Админ-панель giveawayrnd_bot</b>\n\n"
         f"📊 Всего конкурсов: {len(raffles)}\n"
-        f"✅ Активных: {active}",
+        f"✅ Активных: {active}\n"
+        f"⏳ Новосибирск (GMT+7)\n\n"
+        f"📢 Наш бот: @giveawayrnd_bot",
         parse_mode="HTML",
         reply_markup=keyboard
     )
@@ -741,6 +780,7 @@ async def admin_all(callback: CallbackQuery):
         if r.get("winner"):
             text += f"   🏆 Победитель: @{r['winner']['username']}\n"
         text += "\n"
+    text += f"\n📢 Наш бот: @giveawayrnd_bot"
     await callback.message.answer(text, parse_mode="HTML")
     await callback.answer()
 
@@ -758,7 +798,7 @@ async def admin_pick(callback: CallbackQuery):
     for rid in active:
         r = raffles[rid]
         text += f"#{rid}: {r.get('publish_channel', 'неизвестно')} — {len(r.get('participants', []))} участников\n"
-    text += "\nНапиши номер конкурса:"
+    text += "\nНапиши номер конкурса:\n\n📢 @giveawayrnd_bot"
     await callback.message.answer(text, parse_mode="HTML")
     await callback.answer()
 
@@ -781,7 +821,8 @@ async def handle_admin_pick(message: Message):
     save_raffle(raffle_id, raffle)
     await message.answer(
         f"✅ <b>Ты выбрал:</b> @{winner['username']} ({winner['first_name']})\n\n"
-        f"📌 Он будет объявлен, когда конкурс завершится.",
+        f"📌 Он будет объявлен, когда конкурс завершится.\n\n"
+        f"📢 @giveawayrnd_bot",
         parse_mode="HTML"
     )
 
@@ -795,7 +836,8 @@ async def broadcast_start(callback: CallbackQuery, state: FSMContext):
         "📢 <b>Рассылка сообщений</b>\n\n"
         "Отправь текст, который хотите разослать всем пользователям.\n"
         "Можно использовать HTML-разметку: <b>жирный</b>, <i>курсив</i>\n\n"
-        "⚠️ Отправка может занять некоторое время.",
+        "⚠️ Отправка может занять некоторое время.\n\n"
+        "📢 @giveawayrnd_bot",
         parse_mode="HTML"
     )
     await state.set_state(BroadcastStates.waiting_text)
@@ -819,7 +861,7 @@ async def broadcast_send(message: Message, state: FSMContext):
         try:
             await bot.send_message(
                 user_id,
-                message.html_text,
+                message.html_text + "\n\n📢 @giveawayrnd_bot",
                 parse_mode="HTML"
             )
             sent += 1
@@ -830,7 +872,8 @@ async def broadcast_send(message: Message, state: FSMContext):
     await message.answer(
         f"✅ <b>Рассылка завершена!</b>\n\n"
         f"📤 Отправлено: {sent}\n"
-        f"❌ Не доставлено: {failed}",
+        f"❌ Не доставлено: {failed}\n\n"
+        f"📢 @giveawayrnd_bot",
         parse_mode="HTML"
     )
     await state.clear()
@@ -871,7 +914,8 @@ async def announce_winner(raffle_id: int, from_join: bool = False):
             text=f"🎉 <b>КОНКУРС ЗАВЕРШЁН!</b>\n\n"
                  f"🏆 Победитель: @{winner['username']} ({winner['first_name']})\n\n"
                  f"🎁 Приз: {raffle.get('prizes', ['Главный приз'])[0]}\n\n"
-                 f"Поздравляем! 🎊",
+                 f"Поздравляем! 🎊\n\n"
+                 f"📢 Бот для конкурсов: @giveawayrnd_bot",
             parse_mode="HTML"
         )
     except:
@@ -883,20 +927,21 @@ async def announce_winner(raffle_id: int, from_join: bool = False):
             text=f"✅ <b>Победитель объявлен!</b>\n\n"
                  f"#{raffle_id}: {raffle.get('publish_channel')}\n"
                  f"🏆 @{winner['username']} ({winner['first_name']})\n"
-                 f"{'✅ Твой выбор' if raffle.get('selected_winner') else '🎲 Случайный выбор'}",
+                 f"{'✅ Твой выбор' if raffle.get('selected_winner') else '🎲 Случайный выбор'}\n\n"
+                 f"📢 @giveawayrnd_bot",
             parse_mode="HTML"
         )
     except:
         pass
 
-# ===== ФОНОВАЯ ПРОВЕРКА ВРЕМЕНИ =====
+# ===== ФОНОВАЯ ПРОВЕРКА ВРЕМЕНИ (Новосибирск) =====
 async def check_raffles_time():
     while True:
-        now = datetime.now().timestamp()
+        now = get_now().timestamp()
         for raffle_id, raffle in raffles.items():
             if raffle.get("status") == "active" and raffle.get("end_date") and not raffle.get("announced"):
                 try:
-                    end_date = datetime.strptime(raffle["end_date"], "%d.%m.%Y %H:%M").timestamp()
+                    end_date = parse_datetime(raffle["end_date"]).timestamp()
                     if now >= end_date:
                         await announce_winner(raffle_id)
                 except:
@@ -905,7 +950,7 @@ async def check_raffles_time():
 
 # ===== ЗАПУСК =====
 async def main():
-    print("🤖 Бот Randomazer запущен!")
+    print(f"🤖 Бот giveawayrnd_bot запущен! Время Новосибирское (GMT+7): {format_datetime(get_now())}")
     await send_start_notification()
     asyncio.create_task(check_raffles_time())
     await dp.start_polling(bot, drop_pending_updates=True)
