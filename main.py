@@ -60,7 +60,6 @@ dp = Dispatcher(storage=storage)
 
 ADMIN_ID = 7197233783
 SUPPORT_TAG = "@Tonalkasupport"
-REQUIRED_CHANNEL = "@Tonalkabots"
 
 # ===== БАЗА ДАННЫХ =====
 DB_NAME = "database.db"
@@ -247,54 +246,10 @@ class ChannelStates(StatesGroup):
 
 class AdminPickStates(StatesGroup):
     waiting_raffle_id = State()
-    waiting_winners_count = State()
+    waiting_winners = State()
 
 class BroadcastStates(StatesGroup):
     waiting_text = State()
-
-# ===== ПРОВЕРКА ПОДПИСКИ =====
-async def check_subscription(user_id):
-    try:
-        member = await bot.get_chat_member(REQUIRED_CHANNEL, user_id)
-        return member.status not in ["left", "kicked"]
-    except:
-        return False
-
-async def require_subscription(message: Message, state: FSMContext):
-    user_id = message.from_user.id
-    if user_id == ADMIN_ID:
-        return True
-    if not await check_subscription(user_id):
-        keyboard = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="📢 Подписаться", url="https://t.me/Tonalkabots")],
-            [InlineKeyboardButton(text="🔄 Проверить", callback_data="check_sub")]
-        ])
-        await message.answer(
-            f"❌ <b>Для использования бота необходимо подписаться на канал!</b>\n\n"
-            f"📢 Подпишись: {REQUIRED_CHANNEL}\n\n"
-            f"После подписки нажми «Проверить».",
-            parse_mode="HTML",
-            reply_markup=keyboard
-        )
-        return False
-    return True
-
-@dp.callback_query(F.data == "check_sub")
-async def check_sub_callback(callback: CallbackQuery):
-    if await check_subscription(callback.from_user.id):
-        await callback.message.edit_text(
-            "✅ Подписка подтверждена! Теперь вы можете использовать бота.",
-            reply_markup=None
-        )
-        await callback.message.answer(
-            "🎲 <b>GiveawayRND</b>\n\n"
-            "Бот для проведения конкурсов!",
-            parse_mode="HTML",
-            reply_markup=main_keyboard()
-        )
-    else:
-        await callback.answer("❌ Вы ещё не подписаны!", show_alert=True)
-    await callback.answer()
 
 # ===== КОМАНДА ОТМЕНЫ =====
 @dp.message(Command("cancel"))
@@ -306,36 +261,6 @@ async def cancel(message: Message, state: FSMContext):
 @dp.message(Command("start"))
 async def start(message: Message, state: FSMContext):
     await state.clear()
-    
-    user_id = message.from_user.id
-    if user_id == ADMIN_ID:
-        await message.answer(
-            "🎲 <b>GiveawayRND</b>\n\n"
-            "Бот для проведения конкурсов!\n\n"
-            "🔹 <b>Создать конкурс</b>\n"
-            "🔹 <b>Мои конкурсы</b>\n"
-            "🔹 <b>Мои каналы/чаты</b>\n"
-            "🔹 <b>Служба поддержки</b>\n\n"
-            f"📢 Поддержка: {SUPPORT_TAG}",
-            parse_mode="HTML",
-            reply_markup=main_keyboard()
-        )
-        return
-    
-    if not await check_subscription(user_id):
-        keyboard = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="📢 Подписаться", url="https://t.me/Tonalkabots")],
-            [InlineKeyboardButton(text="🔄 Проверить", callback_data="check_sub")]
-        ])
-        await message.answer(
-            f"❌ <b>Подпишись на канал!</b>\n\n"
-            f"📢 {REQUIRED_CHANNEL}\n\n"
-            f"📢 Поддержка: {SUPPORT_TAG}",
-            parse_mode="HTML",
-            reply_markup=keyboard
-        )
-        return
-    
     await message.answer(
         "🎲 <b>GiveawayRND</b>\n\n"
         "Бот для проведения конкурсов!\n\n"
@@ -351,8 +276,6 @@ async def start(message: Message, state: FSMContext):
 # ===== ОБРАБОТЧИКИ КНОПОК =====
 @dp.message(F.text == "📝 Создать конкурс")
 async def create_raffle_button(message: Message, state: FSMContext):
-    if not await require_subscription(message, state):
-        return
     await state.clear()
     await message.answer(
         "📝 <b>Создание конкурса</b>\n\n"
@@ -365,8 +288,6 @@ async def create_raffle_button(message: Message, state: FSMContext):
 
 @dp.message(F.text == "📋 Мои конкурсы")
 async def my_raffles_button(message: Message):
-    if not await require_subscription(message, None):
-        return
     my = [r for r in raffles.values() if r.get("creator") == message.from_user.id]
     if not my:
         await message.answer("📭 У тебя нет конкурсов.", reply_markup=main_keyboard())
@@ -384,8 +305,6 @@ async def my_raffles_button(message: Message):
 
 @dp.message(F.text == "📢 Мои каналы/чаты")
 async def my_channels_button(message: Message):
-    if not await require_subscription(message, None):
-        return
     user_id = message.from_user.id
     channels = user_channels.get(user_id, [])
     if not channels:
@@ -515,7 +434,6 @@ async def get_button_text(message: Message, state: FSMContext):
     await state.update_data(button_text=message.text.strip())
     await ask_channels(message, state)
 
-# ===== ВЫБОР КАНАЛОВ =====
 async def ask_channels(message: Message, state: FSMContext):
     user_id = message.from_user.id
     channels = user_channels.get(user_id, [])
@@ -877,7 +795,7 @@ async def join_raffle(callback: CallbackQuery):
         await announce_winner(raffle_id, from_join=True)
     await callback.answer("✅ Вы участвуете в конкурсе!", show_alert=False)
 
-# ===== АДМИН =====
+# ===== АДМИН-ПАНЕЛЬ =====
 @dp.message(Command("admin"))
 async def admin_panel(message: Message):
     if message.from_user.id != ADMIN_ID:
@@ -913,6 +831,8 @@ async def admin_all(callback: CallbackQuery):
         text += f"   ❗️ Статус: {r.get('status')}\n"
         if r.get("selected_winners"):
             text += f"   👑 Выбрано: {len(r['selected_winners'])} победителей\n"
+        if r.get("winner"):
+            text += f"   🏆 Победитель: @{r['winner']['username']}\n"
         text += "\n"
     await callback.message.answer(text, parse_mode="HTML")
     await callback.answer()
@@ -922,16 +842,20 @@ async def admin_pick(callback: CallbackQuery, state: FSMContext):
     if callback.from_user.id != ADMIN_ID:
         await callback.answer("❌ Нет прав!", show_alert=True)
         return
+    
     active = [rid for rid, r in raffles.items() if r.get("status") == "active" and len(r.get("participants", [])) > 0]
     if not active:
         await callback.message.answer("❌ Нет активных конкурсов с участниками!")
         await callback.answer()
         return
+    
     text = "🎲 <b>Выбери конкурс</b>\n\n"
     for rid in active:
         r = raffles[rid]
-        text += f"#{rid}: {r.get('publish_channel', 'неизвестно')} — {len(r.get('participants', []))} участников\n"
+        selected = " 👑" if r.get("selected_winners") else ""
+        text += f"#{rid}: {r.get('publish_channel', 'неизвестно')} — {len(r.get('participants', []))} участников{selected}\n"
     text += "\nНапиши номер конкурса:"
+    
     await callback.message.answer(text, parse_mode="HTML")
     await state.set_state(AdminPickStates.waiting_raffle_id)
     await callback.answer()
@@ -940,59 +864,91 @@ async def admin_pick(callback: CallbackQuery, state: FSMContext):
 async def admin_pick_raffle(message: Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID:
         return
+    
     if not message.text.isdigit():
         await message.answer("❌ Напиши номер конкурса цифрой!")
         return
+    
     raffle_id = int(message.text)
     raffle = raffles.get(raffle_id)
+    
     if not raffle or raffle.get("status") != "active":
         await message.answer("❌ Конкурс не найден или уже завершён!")
         await state.clear()
         return
+    
     if len(raffle.get("participants", [])) == 0:
         await message.answer("❌ Нет участников!")
         await state.clear()
         return
+    
     await state.update_data(raffle_id=raffle_id)
-    await message.answer(
-        f"🎲 <b>Сколько победителей выбрать?</b>\n\n"
-        f"Участников: {len(raffle['participants'])}\n"
-        f"Напиши число от 1 до {min(10, len(raffle['participants']))}:"
-    )
-    await state.set_state(AdminPickStates.waiting_winners_count)
+    
+    # Показываем список участников с номерами
+    participants = raffle.get("participants", [])
+    text = f"🎲 <b>Выбери победителей</b>\n\n"
+    text += f"📢 {raffle.get('publish_channel', 'неизвестно')}\n"
+    text += f"👥 Участников: {len(participants)}\n\n"
+    text += "<b>Список участников:</b>\n"
+    for i, p in enumerate(participants, 1):
+        text += f"{i}. @{p['username']} ({p['first_name']})\n"
+    
+    if raffle.get("selected_winners"):
+        text += f"\n✅ <b>Уже выбрано:</b> {len(raffle['selected_winners'])} победителей\n"
+        text += "Чтобы изменить выбор — выбери новых (они заменят старых).\n"
+    else:
+        text += "\nНапиши номера через запятую.\n"
+        text += "Пример: <code>3, 7, 12</code>"
+    
+    await message.answer(text, parse_mode="HTML")
+    await state.set_state(AdminPickStates.waiting_winners)
 
-@dp.message(AdminPickStates.waiting_winners_count)
+@dp.message(AdminPickStates.waiting_winners)
 async def admin_pick_winners(message: Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID:
         return
-    if not message.text.isdigit():
-        await message.answer("❌ Напиши число!")
-        return
-    count = int(message.text)
+    
     data = await state.get_data()
     raffle_id = data.get("raffle_id")
     raffle = raffles.get(raffle_id)
+    
     if not raffle:
         await message.answer("❌ Конкурс не найден!")
         await state.clear()
         return
+    
     participants = raffle.get("participants", [])
-    if count < 1 or count > len(participants):
-        await message.answer(f"❌ Введи число от 1 до {len(participants)}!")
+    
+    # Парсим номера
+    try:
+        nums = [int(x.strip()) for x in message.text.split(",")]
+        winners = []
+        for num in nums:
+            if num < 1 or num > len(participants):
+                await message.answer(f"❌ Номер {num} не существует! Всего: {len(participants)}")
+                return
+            winners.append(participants[num - 1])
+    except:
+        await message.answer("❌ Неправильный формат! Пример: <code>3, 7, 12</code>", parse_mode="HTML")
         return
-    shuffled = participants.copy()
-    random.shuffle(shuffled)
-    winners = shuffled[:count]
+    
+    # Сохраняем выбранных победителей
     raffle["selected_winners"] = winners
     save_raffle(raffle_id, raffle)
-    if count == 1:
+    
+    # Показываем результат
+    if len(winners) == 1:
         w = winners[0]
-        text = f"✅ <b>Ты выбрал:</b> @{w['username']} ({w['first_name']})\n\n📌 Он будет объявлен, когда конкурс завершится."
+        text = f"✅ <b>Ты выбрал:</b> @{w['username']} ({w['first_name']})\n\n"
+        text += f"📌 Он будет объявлен, когда конкурс завершится.\n\n"
+        text += "🔄 Чтобы изменить — снова нажми «Выбрать победителей»."
     else:
-        text = f"✅ <b>Ты выбрал {count} победителей:</b>\n\n"
+        text = f"✅ <b>Ты выбрал {len(winners)} победителей:</b>\n\n"
         for i, w in enumerate(winners, 1):
             text += f"{i}. @{w['username']} ({w['first_name']})\n"
-        text += f"\n📌 Они будут объявлены, когда конкурс завершится."
+        text += f"\n📌 Они будут объявлены, когда конкурс завершится.\n\n"
+        text += "🔄 Чтобы изменить — снова нажми «Выбрать победителей»."
+    
     await message.answer(text, parse_mode="HTML")
     await state.clear()
 
@@ -1041,6 +997,7 @@ async def announce_winner(raffle_id: int, from_join: bool = False):
     raffle = raffles.get(raffle_id)
     if not raffle or raffle.get("announced"):
         return
+    
     if raffle.get("selected_winners"):
         winners = raffle["selected_winners"]
     else:
@@ -1051,10 +1008,12 @@ async def announce_winner(raffle_id: int, from_join: bool = False):
         shuffled = participants.copy()
         random.shuffle(shuffled)
         winners = shuffled[:count]
+    
     raffle["winner"] = winners[0] if winners else None
     raffle["status"] = "finished"
     raffle["announced"] = True
     save_raffle(raffle_id, raffle)
+    
     try:
         keyboard = InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="🏆 Завершён", callback_data="finished")]
@@ -1066,6 +1025,7 @@ async def announce_winner(raffle_id: int, from_join: bool = False):
         )
     except:
         pass
+    
     if len(winners) == 1:
         w = winners[0]
         text = f"🎉 <b>КОНКУРС ЗАВЕРШЁН!</b>\n\n🏆 Победитель: @{w['username']} ({w['first_name']})\n\nПоздравляем! 🎊"
@@ -1074,12 +1034,14 @@ async def announce_winner(raffle_id: int, from_join: bool = False):
         for i, w in enumerate(winners, 1):
             text += f"{i}. @{w['username']} ({w['first_name']})\n"
         text += f"\nПоздравляем! 🎊"
+    
     try:
         await bot.send_message(chat_id=raffle["chat_id"], text=text + f"\n\n📢 {SUPPORT_TAG}", parse_mode="HTML")
     except:
         pass
+    
     try:
-        await bot.send_message(ADMIN_ID, text=f"✅ <b>Победители объявлены!</b>\n\n#{raffle_id}: {raffle.get('publish_channel')}\n{text[:200]}", parse_mode="HTML")
+        await bot.send_message(ADMIN_ID, text=f"✅ <b>Победители объявлены!</b>\n\n#{raffle_id}: {raffle.get('publish_channel')}", parse_mode="HTML")
     except:
         pass
 
@@ -1098,7 +1060,7 @@ async def check_raffles_time():
 
 # ===== ЗАПУСК =====
 async def main():
-    print(f"🤖 Бот giveawayrnd_bot запущен! Время: {format_datetime(get_now())}")
+    print(f"🤖 Бот giveawayrnd_bot запущен!")
     await bot.delete_webhook(drop_pending_updates=True)
     asyncio.create_task(check_raffles_time())
     await dp.start_polling(bot, skip_updates=True)
